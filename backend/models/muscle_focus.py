@@ -49,6 +49,14 @@ class MuscleFocus:
         """Devuelve las series semanales asignadas a cada musculo."""
         return {m: PRIORITY_VOLUME[level] for m, level in self._levels.items()}
 
+    def levels(self) -> Dict[str, str]:
+        """Devuelve una copia de los niveles por musculo (para persistir/restaurar)."""
+        return dict(self._levels)
+
+    def muscles_with_level(self, level: str) -> list:
+        """Devuelve los musculos que tienen el nivel de prioridad indicado."""
+        return [m for m, lvl in self._levels.items() if lvl == level]
+
     @classmethod
     def from_primary(cls, primary: Iterable[str], secondary: Iterable[str] = ()):
         """Atajo: crea un enfoque marcando musculos como primarios/secundarios."""

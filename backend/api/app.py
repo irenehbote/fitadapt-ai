@@ -1,57 +1,79 @@
-"""API REST mínima de FitAdapt AI.
+"""API REST de FitAdapt AI.
 
 Se implementa con la libreria estandar (`http.server`) para que el proyecto
 siga funcionando sin instalar nada. La lógica de enrutado vive en `route()`,
-una funcion pura y facil de testear sin abrir sockets; el servidor HTTP solo
-la envuelve.
+una funcion pura y facil de testear sin abrir sockets.
 
-Migrar a FastAPI mas adelante seria directo: las mismas funciones de dominio
-(build_profile_from_dict / serialize_recommendation) se reutilizarian.
+Endpoints sin estado (no necesitan base de datos):
+    GET  /health
+    GET  /conditions
+    GET  /exercises
+    POST /recommendations      -> recomendacion semanal para un perfil (JSON)
+    POST /hormonal             -> adaptacion por fase del ciclo
+    POST /fatigue              -> fatiga y tope de intensidad
+    POST /google-fit           -> ajustes segun datos de Google Fit
+    POST /xp                   -> XP de un ejercicio (handicap por condicion)
+    POST /substitute           -> alternativa de un ejercicio segun entorno
+    POST /progress             -> informe de progreso entre dos medidas
 
-Endpoints:
-    GET  /health            -> estado del servicio
-    GET  /conditions        -> condiciones de salud soportadas
-    GET  /exercises         -> catalogo de ejercicios
-    POST /recommendations   -> recomendacion semanal para un perfil (JSON)
+Endpoints con persistencia (necesitan base de datos):
+    POST   /profiles
+    GET    /profiles
+    GET    /profiles/{id}
+    DELETE /profiles/{id}
+    GET    /profiles/{id}/recommendation
+    POST   /profiles/{id}/measurements
+    GET    /profiles/{id}/progress
 """
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional, Tuple
 
-from ..data.condition_rules import CONDITIONS, get_conditions
-from ..data.exercises import EXERCISES
+from ..analytics.photo_progress import (MeasurementSnapshot,
+                                        generate_progress_report)
+from ..data.condition_rules import CONDITIONS, get_condition, get_conditions
+from ..data.exercises import EXERCISES, EXERCISES_BY_ID
+from ..database.db import DEFAULT_DB, connect, init_db
+from ..database.measurement_repository import MeasurementRepository
+from ..database.profile_repository import ProfileRepository
+from ..engine.condition_filter import is_safe
+from ..engine.environment_adapter import substitute_exercise
+from ..engine.hormonal_adapter import (hormonal_intensity_factor,
+                                       hormonal_notes, phase_for_day)
+from ..engine.intensity_adapter import WorkoutContext, max_allowed_intensity
 from ..engine.recommendation_engine import generate_recommendations
+from ..gamification.fair_scoring import exercise_xp
+from ..integrations.google_fit import HealthData, recommend_adjustments
 from ..models.body_goal import BodyGoal
 from ..models.muscle_focus import MuscleFocus
 from ..models.user_profile import UserProfile
+from ..scheduling.shift_optimizer import (fatigue_adjusted_intensity_cap,
+                                          fatigue_score, is_high_fatigue)
 
+
+# ---------------------------------------------------------------------------
+# Construccion y serializacion de objetos de dominio
+# ---------------------------------------------------------------------------
 
 def build_profile_from_dict(payload: dict) -> UserProfile:
-    """Crea un UserProfile a partir del cuerpo JSON de la peticion.
-
-    Lanza ValueError si algun dato no es valido (clave de condicion u objetivo
-    desconocidos), para responder con 400.
-    """
+    """Crea un UserProfile a partir de un cuerpo JSON. Lanza ValueError si algo falla."""
     if not isinstance(payload, dict):
         raise ValueError("El cuerpo debe ser un objeto JSON")
-
     try:
         condiciones = get_conditions(payload.get("conditions", []))
     except KeyError as e:
         raise ValueError(f"Condicion desconocida: {e}")
-
     objetivo_raw = payload.get("goal", "maintain")
     try:
         objetivo = BodyGoal(objetivo_raw)
     except ValueError:
         raise ValueError(f"Objetivo desconocido: {objetivo_raw}")
-
     foco = payload.get("muscle_focus", {})
     muscle_focus = MuscleFocus.from_primary(
         foco.get("primary", []), foco.get("secondary", []))
-
     return UserProfile(
         name=payload.get("name", "Anonimo"),
         age=int(payload.get("age", 30)),
@@ -77,29 +99,275 @@ def serialize_recommendation(rec) -> dict:
     }
 
 
-def route(method: str, path: str, body: Optional[dict] = None) -> Tuple[int, dict]:
+def serialize_profile(profile: UserProfile, profile_id: int) -> dict:
+    """Serializa un perfil (incluyendo su id de base de datos)."""
+    return {
+        "id": profile_id,
+        "name": profile.name,
+        "age": profile.age,
+        "goal": profile.goal.value,
+        "conditions": profile.condition_keys(),
+        "muscle_levels": profile.muscle_focus.levels(),
+        "environments": profile.available_environments,
+        "equipment": profile.available_equipment,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Contexto con repositorios (persistencia)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ApiContext:
+    """Agrupa los repositorios que necesitan los endpoints con persistencia."""
+
+    profiles: ProfileRepository
+    measurements: MeasurementRepository
+
+
+def make_context(conn) -> ApiContext:
+    """Crea un contexto de API a partir de una conexion a la base de datos."""
+    return ApiContext(ProfileRepository(conn), MeasurementRepository(conn))
+
+
+# ---------------------------------------------------------------------------
+# Handlers de los endpoints sin estado (por modulo)
+# ---------------------------------------------------------------------------
+
+def _recommendations(body: dict) -> Tuple[int, dict]:
+    try:
+        perfil = build_profile_from_dict(body)
+    except ValueError as e:
+        return 400, {"error": str(e)}
+    return 200, serialize_recommendation(generate_recommendations(perfil))
+
+
+def _hormonal(body: dict) -> Tuple[int, dict]:
+    try:
+        condiciones = get_conditions(body.get("conditions", []))
+        perfil = UserProfile(name="x", age=30, conditions=condiciones)
+        dia = int(body["cycle_day"])
+        longitud = int(body.get("cycle_length", 28))
+        fase = phase_for_day(dia, longitud)
+        return 200, {
+            "phase": fase.value,
+            "intensity_factor": hormonal_intensity_factor(perfil, dia, longitud),
+            "notes": hormonal_notes(perfil, dia, longitud),
+        }
+    except (KeyError, ValueError) as e:
+        return 400, {"error": str(e)}
+
+
+def _fatigue(body: dict) -> Tuple[int, dict]:
+    try:
+        score = fatigue_score(
+            consecutive_work_days=int(body.get("consecutive_work_days", 0)),
+            night_shifts_this_week=int(body.get("night_shifts_this_week", 0)),
+            hours_slept_last_night=float(body.get("hours_slept_last_night", 8)),
+            stress_level=int(body.get("stress_level", 1)),
+        )
+    except (TypeError, ValueError) as e:
+        return 400, {"error": str(e)}
+    return 200, {
+        "score": score,
+        "high_fatigue": is_high_fatigue(score),
+        "intensity_cap": fatigue_adjusted_intensity_cap(score),
+    }
+
+
+def _google_fit(body: dict) -> Tuple[int, dict]:
+    data = HealthData(
+        steps_today=body.get("steps_today"),
+        sleep_hours_last_night=body.get("sleep_hours_last_night"),
+        resting_hr_trend=body.get("resting_hr_trend"),
+    )
+    adj = recommend_adjustments(data)
+    return 200, {
+        "intensity_cap": adj.intensity_cap,
+        "reduce_cardio": adj.reduce_cardio,
+        "suggest_deload": adj.suggest_deload,
+        "notes": adj.notes,
+    }
+
+
+def _xp(body: dict) -> Tuple[int, dict]:
+    ejercicio = EXERCISES_BY_ID.get(body.get("exercise_id", ""))
+    if ejercicio is None:
+        return 400, {"error": "exercise_id desconocido"}
+    try:
+        perfil = UserProfile(name="x", age=30,
+                             conditions=get_conditions(body.get("conditions", [])))
+        xp = exercise_xp(ejercicio, intensity=int(body.get("intensity", 5)),
+                         streak_days=int(body.get("streak_days", 0)), profile=perfil)
+    except (KeyError, ValueError) as e:
+        return 400, {"error": str(e)}
+    return 200, {"exercise": ejercicio.name, "xp": xp}
+
+
+def _substitute(body: dict) -> Tuple[int, dict]:
+    ejercicio = EXERCISES_BY_ID.get(body.get("exercise_id", ""))
+    if ejercicio is None:
+        return 400, {"error": "exercise_id desconocido"}
+    try:
+        perfil = build_profile_from_dict(body)
+    except ValueError as e:
+        return 400, {"error": str(e)}
+    sub = substitute_exercise(ejercicio, perfil)
+    return 200, {
+        "original": {"id": ejercicio.id, "name": ejercicio.name,
+                     "available": is_safe(ejercicio, perfil)},
+        "resolved": None if sub is None else {"id": sub.id, "name": sub.name},
+        "changed": sub is not None and sub.id != ejercicio.id,
+    }
+
+
+def _measurement_from_dict(d: dict) -> MeasurementSnapshot:
+    return MeasurementSnapshot(
+        label=d.get("label", "medida"),
+        weight_kg=float(d["weight_kg"]),
+        waist_cm=float(d["waist_cm"]),
+        body_fat_pct=d.get("body_fat_pct"),
+    )
+
+
+def serialize_progress(report) -> dict:
+    return {
+        "days_between": report.days_between,
+        "weight_change_pct": report.weight_change_pct,
+        "waist_change_cm": report.waist_change_cm,
+        "body_fat_change": report.body_fat_change,
+        "progress_score": report.progress_score,
+        "weekly_weight_change_kg": report.weekly_weight_change_kg,
+        "plausible": report.plausible,
+        "commentary": report.commentary,
+    }
+
+
+def _progress(body: dict) -> Tuple[int, dict]:
+    try:
+        antes = _measurement_from_dict(body["before"])
+        despues = _measurement_from_dict(body["after"])
+        dias = int(body["days_between"])
+        condicion = None
+        if body.get("condition"):
+            condicion = get_condition(body["condition"])
+        report = generate_progress_report(antes, despues, dias, condicion)
+    except (KeyError, ValueError) as e:
+        return 400, {"error": str(e)}
+    return 200, serialize_progress(report)
+
+
+# ---------------------------------------------------------------------------
+# Handlers de los endpoints con persistencia (/profiles)
+# ---------------------------------------------------------------------------
+
+def _profiles_route(method: str, segs: list, body: Optional[dict],
+                    ctx: ApiContext) -> Tuple[int, dict]:
+    # /profiles
+    if len(segs) == 1:
+        if method == "POST":
+            try:
+                perfil = build_profile_from_dict(body or {})
+            except ValueError as e:
+                return 400, {"error": str(e)}
+            pid = ctx.profiles.create(perfil)
+            return 201, {"id": pid}
+        if method == "GET":
+            return 200, {"profiles": ctx.profiles.list_all()}
+        return 405, {"error": "Metodo no permitido"}
+
+    # /profiles/{id}[/...]
+    try:
+        pid = int(segs[1])
+    except ValueError:
+        return 404, {"error": "id de perfil invalido"}
+
+    perfil = ctx.profiles.get(pid)
+    if perfil is None:
+        return 404, {"error": "perfil no encontrado"}
+
+    if len(segs) == 2:
+        if method == "GET":
+            return 200, serialize_profile(perfil, pid)
+        if method == "DELETE":
+            ctx.profiles.delete(pid)
+            return 200, {"deleted": True}
+        return 405, {"error": "Metodo no permitido"}
+
+    accion = segs[2]
+    if accion == "recommendation" and method == "GET":
+        return 200, serialize_recommendation(generate_recommendations(perfil))
+
+    if accion == "measurements" and method == "POST":
+        try:
+            snapshot = _measurement_from_dict(body or {})
+            dia = int((body or {}).get("day_index", 0))
+        except (KeyError, ValueError) as e:
+            return 400, {"error": str(e)}
+        mid = ctx.measurements.add(pid, snapshot, dia)
+        return 201, {"id": mid}
+
+    if accion == "progress" and method == "GET":
+        historico = ctx.measurements.list_for(pid)
+        if len(historico) < 2:
+            return 400, {"error": "Se necesitan al menos 2 medidas"}
+        primero, ultimo = historico[0], historico[-1]
+        dias = ultimo["day_index"] - primero["day_index"]
+        if dias <= 0:
+            return 400, {"error": "Las medidas deben estar separadas en el tiempo"}
+        condicion = perfil.conditions[0] if perfil.conditions else None
+        report = generate_progress_report(
+            primero["snapshot"], ultimo["snapshot"], dias, condicion)
+        return 200, serialize_progress(report)
+
+    return 404, {"error": "Ruta no encontrada"}
+
+
+# ---------------------------------------------------------------------------
+# Enrutado principal
+# ---------------------------------------------------------------------------
+
+def route(method: str, path: str, body: Optional[dict] = None,
+          ctx: Optional[ApiContext] = None) -> Tuple[int, dict]:
     """Resuelve una peticion y devuelve (codigo_http, cuerpo_json)."""
+    segs = [s for s in path.split("/") if s]
+
     if method == "GET" and path == "/health":
         return 200, {"status": "ok"}
-
     if method == "GET" and path == "/conditions":
         return 200, {"conditions": [{"key": c.key, "name": c.name}
                                     for c in CONDITIONS.values()]}
-
     if method == "GET" and path == "/exercises":
         return 200, {"exercises": [{"id": e.id, "name": e.name,
                                     "environments": e.environments}
                                    for e in EXERCISES]}
 
-    if method == "POST" and path == "/recommendations":
-        try:
-            perfil = build_profile_from_dict(body or {})
-        except ValueError as e:
-            return 400, {"error": str(e)}
-        rec = generate_recommendations(perfil)
-        return 200, serialize_recommendation(rec)
+    if method == "POST":
+        handlers = {
+            "/recommendations": _recommendations,
+            "/hormonal": _hormonal,
+            "/fatigue": _fatigue,
+            "/google-fit": _google_fit,
+            "/xp": _xp,
+            "/substitute": _substitute,
+            "/progress": _progress,
+        }
+        if path in handlers:
+            return handlers[path](body or {})
+
+    if segs and segs[0] == "profiles":
+        if ctx is None:
+            return 503, {"error": "Persistencia no disponible"}
+        return _profiles_route(method, segs, body, ctx)
 
     return 404, {"error": "Ruta no encontrada"}
+
+
+# ---------------------------------------------------------------------------
+# Servidor HTTP
+# ---------------------------------------------------------------------------
+
+_CONTEXT: Optional[ApiContext] = None  # se inicializa en run()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -110,9 +378,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(cuerpo)))
-        # CORS: permite que el frontend (otro puerto) consuma la API.
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(cuerpo)
@@ -120,13 +387,15 @@ class _Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):  # noqa: N802 (preflight CORS)
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
-    def do_GET(self):  # noqa: N802 (nombre exigido por la libreria)
-        status, payload = route("GET", self.path)
-        self._responder(status, payload)
+    def do_GET(self):  # noqa: N802
+        self._responder(*route("GET", self.path, ctx=_CONTEXT))
+
+    def do_DELETE(self):  # noqa: N802
+        self._responder(*route("DELETE", self.path, ctx=_CONTEXT))
 
     def do_POST(self):  # noqa: N802
         longitud = int(self.headers.get("Content-Length", 0))
@@ -136,22 +405,26 @@ class _Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._responder(400, {"error": "JSON invalido"})
             return
-        status, payload = route("POST", self.path, body)
-        self._responder(status, payload)
+        self._responder(*route("POST", self.path, body, ctx=_CONTEXT))
 
     def log_message(self, *args):  # silencia el log por defecto
         pass
 
 
-def run(port: int = 8000) -> None:
-    """Arranca el servidor HTTP (Ctrl+C para parar)."""
+def run(port: int = 8000, db_path: str = DEFAULT_DB) -> None:
+    """Arranca el servidor HTTP con persistencia en SQLite (Ctrl+C para parar)."""
+    global _CONTEXT
+    conn = connect(db_path)
+    init_db(conn)
+    _CONTEXT = make_context(conn)
     servidor = HTTPServer(("127.0.0.1", port), _Handler)
-    print(f"FitAdapt AI API escuchando en http://127.0.0.1:{port}")
+    print(f"FitAdapt AI API escuchando en http://127.0.0.1:{port} (BD: {db_path})")
     try:
         servidor.serve_forever()
     except KeyboardInterrupt:
         print("\nServidor detenido.")
         servidor.server_close()
+        conn.close()
 
 
 if __name__ == "__main__":
