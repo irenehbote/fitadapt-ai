@@ -16,7 +16,7 @@ disponible (gimnasio, casa, exterior) y su equipamiento.
 
 ## ✨ Qué hace (backend real y ejecutable, solo librería estándar)
 
-**69 pruebas unitarias, todas pasan.** Sin dependencias externas.
+**88 pruebas unitarias, todas pasan.** Sin dependencias externas.
 
 - **Filtro de seguridad por condición** — descarta ejercicios contraindicados
   (sin alto impacto en osteoporosis/artrosis; sin flexión de columna en
@@ -36,7 +36,10 @@ disponible (gimnasio, casa, exterior) y su equipamiento.
 - **Gamificación 1v1 opcional** — XP con hándicap justo por condición y retos
   que solo cuentan si se aceptan.
 - **Influencia de Google Fit** — sueño, pasos y FC en reposo ajustan el plan.
-- **API REST** — `/health`, `/conditions`, `/exercises`, `POST /recommendations`.
+- **API REST** — recomendación y endpoints para todos los módulos.
+- **Persistencia (SQLite)** — guarda perfiles y su histórico de medidas; calcula
+  recomendación y progreso de perfiles almacenados.
+- **Frontend React** — interfaz con pestañas que usa **todos** los módulos.
 
 > 🔍 **Fronteras honestas:** la estimación de grasa por **foto** (visión por
 > computador) y la **conexión OAuth real** con Google Fit quedan como puntos de
@@ -55,9 +58,10 @@ fitadapt-ai/
 │   ├── integrations/  # Google Fit (influencia + cliente OAuth pendiente)
 │   ├── analytics/     # Estadística y informe de progreso corporal
 │   ├── api/           # API REST (http.server)
+│   ├── database/      # Persistencia SQLite (perfiles y medidas)
 │   └── data/          # Catálogo de ejercicios y reglas de condiciones
 ├── frontend/          # App React + Vite + TypeScript (ver frontend/README.md)
-├── tests/             # 69 pruebas unitarias (unittest)
+├── tests/             # 88 pruebas unitarias (unittest)
 └── demo.py            # Demostración por consola
 ```
 
@@ -104,14 +108,14 @@ Implementado ✅:
 - [x] Analítica e informe de progreso corporal
 - [x] Gamificación 1v1 con hándicap justo
 - [x] Lógica de influencia de Google Fit
-- [x] API REST
-- [x] Frontend (React + Vite + TypeScript)
+- [x] API REST (con endpoints para todos los módulos)
+- [x] Frontend (React + Vite + TypeScript) conectado a todos los módulos
+- [x] Persistencia en base de datos (SQLite)
 
 Pendiente (requiere servicios/ML externos):
 
 - [ ] Estimación de composición corporal por **foto** (visión por computador)
 - [ ] Conexión **OAuth real** con Google Fit
-- [ ] Persistencia en base de datos
 
 ## 📄 Licencia
 

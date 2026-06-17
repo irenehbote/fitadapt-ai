@@ -118,3 +118,46 @@ code { background: #0d1320; padding: .1rem .35rem; border-radius: 5px; }
 
 .notes { color: var(--muted); line-height: 1.5; }
 .result h3 { margin: 1.2rem 0 .5rem; }
+
+.muted { color: var(--muted); }
+.ok-msg { color: var(--accent); }
+
+/* Pestañas */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin: 0 0 1.25rem;
+}
+.tab {
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: .45rem .9rem;
+  font-size: .9rem;
+  font-weight: 600;
+}
+.tab.active {
+  background: var(--accent-2);
+  color: #04212f;
+  border-color: var(--accent-2);
+}
+
+/* Lista de perfiles guardados */
+.saved-list { list-style: none; padding: 0; margin: 0; }
+.saved-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.saved-list .actions { display: flex; gap: .4rem; }
+button.small {
+  padding: .3rem .6rem;
+  font-size: .8rem;
+  font-weight: 600;
+}
+button.danger { background: #f87171; color: #2a0606; }
