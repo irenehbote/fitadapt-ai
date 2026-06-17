@@ -56,6 +56,7 @@ fitadapt-ai/
 │   ├── analytics/     # Estadística y informe de progreso corporal
 │   ├── api/           # API REST (http.server)
 │   └── data/          # Catálogo de ejercicios y reglas de condiciones
+├── frontend/          # App React + Vite + TypeScript (ver frontend/README.md)
 ├── tests/             # 69 pruebas unitarias (unittest)
 └── demo.py            # Demostración por consola
 ```
@@ -82,6 +83,15 @@ curl -X POST http://127.0.0.1:8000/recommendations \
 python -m unittest discover -s tests -t . -v
 ```
 
+### Frontend (React)
+
+```bash
+cd frontend
+npm install
+npm run dev        # http://localhost:5173 (necesita la API en marcha)
+```
+Más detalles en [frontend/README.md](frontend/README.md).
+
 ## 🧭 Hoja de ruta
 
 Implementado ✅:
@@ -95,12 +105,12 @@ Implementado ✅:
 - [x] Gamificación 1v1 con hándicap justo
 - [x] Lógica de influencia de Google Fit
 - [x] API REST
+- [x] Frontend (React + Vite + TypeScript)
 
-Pendiente (requiere servicios/ML externos o un frontend completo):
+Pendiente (requiere servicios/ML externos):
 
 - [ ] Estimación de composición corporal por **foto** (visión por computador)
 - [ ] Conexión **OAuth real** con Google Fit
-- [ ] **Frontend** (React)
 - [ ] Persistencia en base de datos
 
 ## 📄 Licencia
