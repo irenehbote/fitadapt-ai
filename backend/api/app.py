@@ -28,6 +28,8 @@ Endpoints con persistencia (necesitan base de datos):
 from __future__ import annotations
 
 import json
+import mimetypes
+import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional, Tuple
@@ -423,6 +425,21 @@ def route(method: str, path: str, body: Optional[dict] = None,
 _CONTEXT: Optional[ApiContext] = None  # se inicializa en run()
 
 
+def _strip_api_prefix(path: str) -> str:
+    """Quita el prefijo /api si esta presente (para servir API y estaticos juntos)."""
+    if path == "/api":
+        return "/"
+    if path.startswith("/api/"):
+        return path[4:]
+    return path
+
+
+def _static_dir() -> Optional[str]:
+    """Carpeta de ficheros estaticos del frontend, si esta configurada y existe."""
+    base = os.environ.get("FITADAPT_STATIC")
+    return base if base and os.path.isdir(base) else None
+
+
 class _Handler(BaseHTTPRequestHandler):
     """Adaptador HTTP: lee la peticion, llama a route() y escribe la respuesta."""
 
@@ -444,11 +461,40 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    def _serve_static(self, raw_path: str) -> None:
+        """Sirve un fichero del frontend; si no existe, devuelve index.html (SPA)."""
+        base = _static_dir()
+        if base is None:
+            self._responder(404, {"error": "Ruta no encontrada"})
+            return
+        rel = raw_path.split("?", 1)[0].lstrip("/") or "index.html"
+        candidate = os.path.normpath(os.path.join(base, rel))
+        # Proteccion contra path traversal: no salir de la carpeta base.
+        if not candidate.startswith(os.path.normpath(base)) or not os.path.isfile(candidate):
+            candidate = os.path.join(base, "index.html")
+        if not os.path.isfile(candidate):
+            self._responder(404, {"error": "Ruta no encontrada"})
+            return
+        ctype = mimetypes.guess_type(candidate)[0] or "application/octet-stream"
+        with open(candidate, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):  # noqa: N802
-        self._responder(*route("GET", self.path, ctx=_CONTEXT))
+        explicit_api = self.path == "/api" or self.path.startswith("/api/")
+        status, body = route("GET", _strip_api_prefix(self.path), ctx=_CONTEXT)
+        # Si no es una ruta de API conocida, intentamos servir el frontend.
+        if status == 404 and not explicit_api and _static_dir() is not None:
+            self._serve_static(self.path)
+            return
+        self._responder(status, body)
 
     def do_DELETE(self):  # noqa: N802
-        self._responder(*route("DELETE", self.path, ctx=_CONTEXT))
+        self._responder(*route("DELETE", _strip_api_prefix(self.path), ctx=_CONTEXT))
 
     def do_POST(self):  # noqa: N802
         longitud = int(self.headers.get("Content-Length", 0))
@@ -458,20 +504,30 @@ class _Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._responder(400, {"error": "JSON invalido"})
             return
-        self._responder(*route("POST", self.path, body, ctx=_CONTEXT))
+        self._responder(*route("POST", _strip_api_prefix(self.path), body, ctx=_CONTEXT))
 
     def log_message(self, *args):  # silencia el log por defecto
         pass
 
 
-def run(port: int = 8000, db_path: str = DEFAULT_DB) -> None:
-    """Arranca el servidor HTTP con persistencia en SQLite (Ctrl+C para parar)."""
+def run(port: Optional[int] = None, db_path: Optional[str] = None) -> None:
+    """Arranca el servidor HTTP con persistencia en SQLite (Ctrl+C para parar).
+
+    En despliegue lee el puerto de la variable PORT y escucha en 0.0.0.0. Si
+    FITADAPT_STATIC apunta a una carpeta, sirve ademas el frontend compilado.
+    """
     global _CONTEXT
+    if port is None:
+        port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    db_path = db_path or os.environ.get("FITADAPT_DB", DEFAULT_DB)
     conn = connect(db_path)
     init_db(conn)
     _CONTEXT = make_context(conn)
-    servidor = HTTPServer(("127.0.0.1", port), _Handler)
-    print(f"FitAdapt AI API escuchando en http://127.0.0.1:{port} (BD: {db_path})")
+    servidor = HTTPServer((host, port), _Handler)
+    estaticos = _static_dir()
+    extra = f" | frontend: {estaticos}" if estaticos else ""
+    print(f"FitAdapt AI API escuchando en http://{host}:{port} (BD: {db_path}){extra}")
     try:
         servidor.serve_forever()
     except KeyboardInterrupt:

@@ -1,0 +1,10 @@
+.git
+**/__pycache__/
+**/*.pyc
+frontend/node_modules/
+frontend/dist/
+tests/
+*.db
+backend/vision/models/
+*.task
+.github/

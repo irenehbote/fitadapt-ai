@@ -1,0 +1,20 @@
+# Blueprint de Render: un unico servicio web (Docker) que sirve el backend
+# (API + persistencia SQLite) y el frontend compilado.
+#
+# Como desplegar:
+#   1. Crea una cuenta gratuita en https://render.com (puedes entrar con GitHub).
+#   2. New + -> Blueprint -> selecciona el repo irenehbote/fitadapt-ai.
+#   3. Render lee este archivo y crea el servicio. Deploy.
+#
+# El plan free duerme tras inactividad y la BD SQLite es efimera (se reinicia en
+# cada despliegue): suficiente para una demo.
+services:
+  - type: web
+    name: fitadapt-ai
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"

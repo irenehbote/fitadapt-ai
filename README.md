@@ -134,6 +134,26 @@ Pendiente (requiere servicios/ML externos):
 - [ ] Conexión **OAuth real** con Google Fit
 - [ ] Validar la precisión del pipeline de foto contra un método de referencia
 
+## 🚀 Despliegue
+
+**Frontend — GitHub Pages** (automatico): cada push a `main` dispara el workflow
+[`deploy-pages.yml`](.github/workflows/deploy-pages.yml), que compila el frontend
+y lo publica en **https://irenehbote.github.io/fitadapt-ai/**. La UI carga sola;
+para que las llamadas funcionen necesita un backend (ver abajo) y fijar la
+variable `VITE_API_BASE` con su URL.
+
+**Backend + app completa — Render** (un servicio Docker que sirve API + frontend):
+
+1. Crea una cuenta gratis en [render.com](https://render.com) (entra con GitHub).
+2. **New + → Blueprint** y selecciona el repo. Render lee [`render.yaml`](render.yaml)
+   y construye el [`Dockerfile`](Dockerfile) (frontend compilado + backend).
+3. Deploy. Tendras una URL tipo `https://fitadapt-ai.onrender.com` con la app
+   completa funcionando (API en `/api`).
+
+El plan free de Render duerme tras inactividad y su SQLite es efimero (se reinicia
+en cada deploy): suficiente para una demo. La estimacion por foto (MediaPipe) se
+deja fuera del despliegue a proposito (pesada y opcional).
+
 ## 📄 Licencia
 
 [MIT](LICENSE)

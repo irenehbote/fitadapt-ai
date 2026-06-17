@@ -67,7 +67,9 @@ export interface BodyFatResult {
   circumferences?: Record<string, number>
 }
 
-const BASE = '/api'
+// En desarrollo: '/api' (proxy de Vite). En produccion se puede fijar
+// VITE_API_BASE al backend desplegado (Render). Por defecto, '/api'.
+const BASE = import.meta.env.VITE_API_BASE ?? '/api'
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`)
