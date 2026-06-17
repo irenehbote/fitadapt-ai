@@ -1,0 +1,5 @@
+# El nucleo actual de FitAdapt AI funciona SOLO con la libreria estandar de Python
+# (3.10+). No necesita dependencias externas para ejecutarse ni para pasar las pruebas.
+#
+# Las dependencias del stack completo (FastAPI, NumPy/SciPy, scikit-learn,
+# TensorFlow/MediaPipe, etc.) se anadiran a medida que se implementen esos modulos.
