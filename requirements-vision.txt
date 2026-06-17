@@ -1,0 +1,10 @@
+# Dependencias OPCIONALES para el pipeline de estimacion por foto (backend/vision).
+# El resto del proyecto funciona sin ellas.
+#
+# Instalacion:
+#   pip install -r requirements-vision.txt
+#   python -m backend.vision.download_model   # (--insecure si tu red intercepta TLS)
+mediapipe>=0.10.0
+# mediapipe ya arrastra opencv-contrib-python y numpy, pero los listamos explicitos:
+opencv-contrib-python>=4.8
+numpy>=1.24

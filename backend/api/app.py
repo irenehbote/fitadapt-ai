@@ -248,6 +248,30 @@ def _body_fat(body: dict) -> Tuple[int, dict]:
     }
 
 
+def _body_fat_photo(body: dict) -> Tuple[int, dict]:
+    import base64
+    from ..vision import body_measure
+    if not body_measure.is_available():
+        return 501, {"error": "Modulo de vision no instalado "
+                              "(pip install -r requirements-vision.txt)"}
+    if not body_measure.model_available():
+        return 501, {"error": "Modelo no descargado "
+                              "(python -m backend.vision.download_model)"}
+    try:
+        front = base64.b64decode(body["front_image_b64"])
+        side = base64.b64decode(body["side_image_b64"])
+        height_cm = float(body["height_cm"])
+        sex = body.get("sex", "male")
+        result = body_measure.estimate_body_fat_from_photos(front, side, height_cm, sex)
+    except KeyError as e:
+        return 400, {"error": f"Falta el campo {e}"}
+    except body_measure.NoPersonDetectedError as e:
+        return 422, {"error": str(e)}
+    except (ValueError, TypeError) as e:
+        return 400, {"error": str(e)}
+    return 200, result
+
+
 def _measurement_from_dict(d: dict) -> MeasurementSnapshot:
     return MeasurementSnapshot(
         label=d.get("label", "medida"),
@@ -379,6 +403,7 @@ def route(method: str, path: str, body: Optional[dict] = None,
             "/substitute": _substitute,
             "/progress": _progress,
             "/body-fat": _body_fat,
+            "/body-fat/photo": _body_fat_photo,
         }
         if path in handlers:
             return handlers[path](body or {})

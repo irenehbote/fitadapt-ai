@@ -59,6 +59,15 @@ class TestModuleEndpoints(unittest.TestCase):
         status, _ = route("POST", "/body-fat", {"sex": "male", "height_cm": 180})
         self.assertEqual(status, 400)
 
+    def test_body_fat_photo_sin_dependencias_o_modelo(self):
+        from backend.vision import body_measure
+        if body_measure.is_available() and body_measure.model_available():
+            self.skipTest("vision y modelo presentes; el caso 501 no aplica")
+        status, body = route("POST", "/body-fat/photo", {
+            "front_image_b64": "", "side_image_b64": "", "height_cm": 170})
+        self.assertEqual(status, 501)
+        self.assertIn("error", body)
+
     def test_progress(self):
         status, body = route("POST", "/progress", {
             "before": {"label": "a", "weight_kg": 80, "waist_cm": 90},

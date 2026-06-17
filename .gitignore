@@ -10,3 +10,7 @@ venv/
 
 # Base de datos local de SQLite
 *.db
+
+# Modelos de vision (se descargan con backend/vision/download_model.py)
+backend/vision/models/
+*.task
