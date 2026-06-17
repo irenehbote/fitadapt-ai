@@ -42,6 +42,23 @@ class TestModuleEndpoints(unittest.TestCase):
         self.assertTrue(body["changed"])
         self.assertIsNotNone(body["resolved"])
 
+    def test_body_fat_navy(self):
+        status, body = route("POST", "/body-fat", {
+            "sex": "male", "height_cm": 180, "neck_cm": 38, "waist_cm": 85})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["method"], "navy")
+        self.assertTrue(2 < body["body_fat_pct"] < 60)
+
+    def test_body_fat_bmi_fallback(self):
+        status, body = route("POST", "/body-fat", {
+            "sex": "male", "height_cm": 180, "weight_kg": 80, "age": 30})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["method"], "bmi_deurenberg")
+
+    def test_body_fat_sin_datos(self):
+        status, _ = route("POST", "/body-fat", {"sex": "male", "height_cm": 180})
+        self.assertEqual(status, 400)
+
     def test_progress(self):
         status, body = route("POST", "/progress", {
             "before": {"label": "a", "weight_kg": 80, "waist_cm": 90},

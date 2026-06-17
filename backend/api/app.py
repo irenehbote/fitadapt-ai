@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional, Tuple
 
+from ..analytics.body_composition import estimate_body_fat
 from ..analytics.photo_progress import (MeasurementSnapshot,
                                         generate_progress_report)
 from ..data.condition_rules import CONDITIONS, get_condition, get_conditions
@@ -221,6 +222,32 @@ def _substitute(body: dict) -> Tuple[int, dict]:
     }
 
 
+def _opt_float(value):
+    """Convierte a float si hay valor; None en caso contrario."""
+    return None if value is None else float(value)
+
+
+def _body_fat(body: dict) -> Tuple[int, dict]:
+    try:
+        est = estimate_body_fat(
+            sex=body.get("sex", "male"),
+            height_cm=float(body["height_cm"]),
+            neck_cm=_opt_float(body.get("neck_cm")),
+            waist_cm=_opt_float(body.get("waist_cm")),
+            hip_cm=_opt_float(body.get("hip_cm")),
+            weight_kg=_opt_float(body.get("weight_kg")),
+            age=None if body.get("age") is None else int(body["age"]),
+        )
+    except (KeyError, ValueError, TypeError) as e:
+        return 400, {"error": str(e)}
+    return 200, {
+        "body_fat_pct": est.body_fat_pct,
+        "method": est.method,
+        "category": est.category,
+        "confidence_note": est.confidence_note,
+    }
+
+
 def _measurement_from_dict(d: dict) -> MeasurementSnapshot:
     return MeasurementSnapshot(
         label=d.get("label", "medida"),
@@ -351,6 +378,7 @@ def route(method: str, path: str, body: Optional[dict] = None,
             "/xp": _xp,
             "/substitute": _substitute,
             "/progress": _progress,
+            "/body-fat": _body_fat,
         }
         if path in handlers:
             return handlers[path](body or {})
