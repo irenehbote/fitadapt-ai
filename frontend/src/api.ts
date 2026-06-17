@@ -59,6 +59,14 @@ export interface ProgressResult {
 
 export interface ProfileSummary { id: number; name: string; goal: string }
 
+export interface BodyFatResult {
+  body_fat_pct: number
+  method: string
+  category: string
+  confidence_note: string
+  circumferences?: Record<string, number>
+}
+
 const BASE = '/api'
 
 async function getJson<T>(path: string): Promise<T> {
@@ -106,6 +114,17 @@ export const getProgress = (b: {
   after: { label: string; weight_kg: number; waist_cm: number; body_fat_pct?: number }
   days_between: number; condition?: string
 }) => send<ProgressResult>('/progress', 'POST', b)
+
+// --- Composicion corporal ---
+export const getBodyFat = (b: {
+  sex: string; height_cm: number
+  neck_cm?: number; waist_cm?: number; hip_cm?: number
+  weight_kg?: number; age?: number
+}) => send<BodyFatResult>('/body-fat', 'POST', b)
+
+export const getBodyFatPhoto = (b: {
+  front_image_b64: string; side_image_b64: string; height_cm: number; sex: string
+}) => send<BodyFatResult>('/body-fat/photo', 'POST', b)
 
 // --- Persistencia de perfiles ---
 export const saveProfile = (p: ProfilePayload) => send<{ id: number }>('/profiles', 'POST', p)

@@ -11,12 +11,14 @@ import { GamificationTab } from './components/GamificationTab'
 import { FatigueTab } from './components/FatigueTab'
 import { GoogleFitTab } from './components/GoogleFitTab'
 import { ProgressTab } from './components/ProgressTab'
+import { CompositionTab } from './components/CompositionTab'
 
 const TABS = [
   { id: 'reco', label: 'Recomendacion' },
   { id: 'hormonal', label: 'Hormonal' },
   { id: 'gamification', label: 'Gamificacion' },
   { id: 'progress', label: 'Progreso' },
+  { id: 'composition', label: 'Composicion' },
   { id: 'fatigue', label: 'Fatiga / turnos' },
   { id: 'googlefit', label: 'Google Fit' },
   { id: 'saved', label: 'Perfiles guardados' },
@@ -67,6 +69,7 @@ export function App() {
         {profile && tab === 'hormonal' && <HormonalTab profile={profile} />}
         {profile && tab === 'gamification' && <GamificationTab profile={profile} exercises={exercises} />}
         {profile && tab === 'progress' && <ProgressTab profile={profile} />}
+        {tab === 'composition' && <CompositionTab />}
         {tab === 'fatigue' && <FatigueTab />}
         {tab === 'googlefit' && <GoogleFitTab />}
         {profile && tab === 'saved' && <SavedProfilesTab profile={profile} />}

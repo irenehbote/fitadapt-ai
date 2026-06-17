@@ -161,3 +161,13 @@ button.small {
   font-weight: 600;
 }
 button.danger { background: #f87171; color: #2a0606; }
+
+.badge {
+  font-size: .7rem;
+  background: #f59e0b;
+  color: #2a1a00;
+  border-radius: 6px;
+  padding: .1rem .4rem;
+  vertical-align: middle;
+  font-weight: 700;
+}

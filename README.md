@@ -39,6 +39,8 @@ disponible (gimnasio, casa, exterior) y su equipamiento.
 - **API REST** — recomendación y endpoints para todos los módulos.
 - **Persistencia (SQLite)** — guarda perfiles y su histórico de medidas; calcula
   recomendación y progreso de perfiles almacenados.
+- **Composición corporal** — % de grasa por **fórmula Navy** (circunferencias) o
+  por IMC; y un pipeline **experimental por foto** (MediaPipe, opcional).
 - **Frontend React** — interfaz con pestañas que usa **todos** los módulos.
 
 > 🔍 **Fronteras honestas:** la estimación de grasa por **foto** (visión por
@@ -96,6 +98,19 @@ npm run dev        # http://localhost:5173 (necesita la API en marcha)
 ```
 Más detalles en [frontend/README.md](frontend/README.md).
 
+### Estimación por foto (opcional, experimental)
+
+La fórmula Navy (por medidas) funciona sin nada extra. La estimación **por foto**
+necesita dependencias adicionales y descargar un modelo:
+
+```bash
+pip install -r requirements-vision.txt
+python -m backend.vision.download_model        # --insecure si tu red intercepta TLS
+```
+Es una estimación **orientativa** (~±5-8%), no una medición. Si no instalas esto,
+el endpoint `POST /body-fat/photo` responde `501` con instrucciones; el resto del
+proyecto sigue funcionando igual.
+
 ## 🧭 Hoja de ruta
 
 Implementado ✅:
@@ -112,10 +127,12 @@ Implementado ✅:
 - [x] Frontend (React + Vite + TypeScript) conectado a todos los módulos
 - [x] Persistencia en base de datos (SQLite)
 
+- [x] Composición corporal: fórmula Navy/IMC + estimación **por foto** (experimental, opcional)
+
 Pendiente (requiere servicios/ML externos):
 
-- [ ] Estimación de composición corporal por **foto** (visión por computador)
 - [ ] Conexión **OAuth real** con Google Fit
+- [ ] Validar la precisión del pipeline de foto contra un método de referencia
 
 ## 📄 Licencia
 
